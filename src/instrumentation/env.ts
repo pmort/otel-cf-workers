@@ -5,6 +5,9 @@ import { instrumentQueueSender } from './queue.js'
 import { instrumentServiceBinding } from './service.js'
 import { instrumentD1 } from './d1'
 import { instrumentAnalyticsEngineDataset } from './analytics-engine.js'
+import { instrumentR2 } from './r2.js'
+import { instrumentHyperdrive } from './hyperdrive.js'
+import { instrumentDispatchNamespace } from './dispatch.js'
 
 const isJSRPC = (item?: unknown): item is Service => {
 	// @ts-expect-error The point of RPC types is to block non-existent properties, but that's the goal here
@@ -39,6 +42,23 @@ const isD1Database = (item?: unknown): item is D1Database => {
 	return !!(item as D1Database)?.exec && !!(item as D1Database)?.prepare
 }
 
+const isR2Bucket = (item?: unknown): item is R2Bucket => {
+	return !isJSRPC(item) && !!(item as R2Bucket)?.createMultipartUpload
+}
+
+const isHyperdrive = (item?: unknown): item is Hyperdrive => {
+	return (
+		!isJSRPC(item) &&
+		typeof (item as Hyperdrive)?.connectionString === 'string' &&
+		typeof (item as Hyperdrive)?.host === 'string' &&
+		typeof (item as Hyperdrive)?.port === 'number'
+	)
+}
+
+const isDispatchNamespace = (item?: unknown): item is DispatchNamespace => {
+	return !isJSRPC(item) && !!(item as DispatchNamespace)?.get && !isR2Bucket(item) && !isDurableObject(item)
+}
+
 const instrumentEnv = <E extends Record<string, unknown>>(env: E): E => {
 	const envHandler: ProxyHandler<Record<string, unknown>> = {
 		get: (target, prop, receiver) => {
@@ -61,6 +81,12 @@ const instrumentEnv = <E extends Record<string, unknown>>(env: E): E => {
 				return instrumentAnalyticsEngineDataset(item, String(prop))
 			} else if (isD1Database(item)) {
 				return instrumentD1(item, String(prop))
+			} else if (isR2Bucket(item)) {
+				return instrumentR2(item, String(prop))
+			} else if (isHyperdrive(item)) {
+				return instrumentHyperdrive(item, String(prop))
+			} else if (isDispatchNamespace(item)) {
+				return instrumentDispatchNamespace(item, String(prop))
 			} else {
 				return item
 			}
