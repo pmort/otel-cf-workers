@@ -1,6 +1,6 @@
 {
-	"name": "@microlabs/otel-cf-workers",
-	"version": "1.0.0-rc.52",
+	"name": "@pmort/otel-cf-workers",
+	"version": "1.0.0-rc.54",
 	"module": "./dist/index.js",
 	"type": "module",
 	"types": "./dist/index.d.ts",
@@ -52,8 +52,13 @@
 	"peerDependencies": {
 		"@opentelemetry/api": "~1.9.0"
 	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/pmort/otel-cf-workers"
+	},
 	"publishConfig": {
-		"access": "public"
+		"access": "public",
+		"registry": "https://npm.pkg.github.com"
 	},
 	"license": "BSD-3-Clause",
 	"lint-staged": {
