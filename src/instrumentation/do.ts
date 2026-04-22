@@ -20,6 +20,42 @@ type FetchFn = DurableObject['fetch']
 type AlarmFn = DurableObject['alarm']
 type Env = Record<string, unknown>
 
+function instrumentStubRpc(
+	fn: (...args: unknown[]) => unknown,
+	nsName: string,
+	methodName: string,
+	stub: DurableObjectStub,
+) {
+	const handler: ProxyHandler<typeof fn> = {
+		apply(target, thisArg, argArray) {
+			const tracer = trace.getTracer('DO rpcClient')
+			const options: SpanOptions = {
+				kind: SpanKind.CLIENT,
+				attributes: {
+					'rpc.method': methodName,
+					'do.namespace': nsName,
+					'do.id': stub.id.toString(),
+					'do.id.name': stub.id.name,
+				},
+			}
+			return tracer.startActiveSpan(`DO RPC ${nsName}.${methodName}`, options, async (span) => {
+				try {
+					const result = await Reflect.apply(target, unwrap(thisArg), argArray)
+					span.setStatus({ code: SpanStatusCode.OK })
+					return result
+				} catch (error) {
+					span.recordException(error as Exception)
+					span.setStatus({ code: SpanStatusCode.ERROR })
+					throw error
+				} finally {
+					span.end()
+				}
+			})
+		},
+	}
+	return wrap(fn, handler)
+}
+
 function instrumentBindingStub(stub: DurableObjectStub, nsName: string): DurableObjectStub {
 	const stubHandler: ProxyHandler<typeof stub> = {
 		get(target, prop, receiver) {
@@ -33,7 +69,11 @@ function instrumentBindingStub(stub: DurableObjectStub, nsName: string): Durable
 				}
 				return instrumentClientFetch(fetcher, () => ({ includeTraceContext: true }), attrs)
 			} else {
-				return passthroughGet(target, prop, receiver)
+				const value = passthroughGet(target, prop, receiver)
+				if (typeof value === 'function' && typeof prop === 'string') {
+					return instrumentStubRpc(value, nsName, prop, target)
+				}
+				return value
 			}
 		},
 	}
@@ -176,20 +216,43 @@ function instrumentAlarmFn(alarmFn: AlarmFn, initialiser: Initialiser, env: Env,
 	return wrap(alarmFn, alarmHandler)
 }
 
-function instrumentAnyFn(fn: () => any, initialiser: Initialiser, env: Env, _id: DurableObjectId) {
+function instrumentAnyFn(fn: () => any, initialiser: Initialiser, env: Env, id: DurableObjectId) {
 	if (!fn) return undefined
 
 	const fnHandler: ProxyHandler<() => any> = {
 		async apply(target, thisArg, argArray: []) {
 			thisArg = unwrap(thisArg)
-			const config = initialiser(env, 'do-alarm')
+			const config = initialiser(env, 'do-rpc')
 			const context = setConfig(config)
-			try {
-				const bound = target.bind(unwrap(thisArg))
-				return await api_context.with(context, () => bound.apply(thisArg, argArray), undefined)
-			} catch (error) {
-				throw error
-			}
+
+			const methodName = target.name || 'unknown'
+			return api_context.with(context, () => {
+				const tracer = trace.getTracer('DO rpcHandler')
+				const name = id.name || ''
+				const options: SpanOptions = {
+					attributes: {
+						'faas.trigger': 'rpc',
+						'rpc.method': methodName,
+						'do.id': id.toString(),
+						...(name ? { 'do.name': name } : {}),
+					},
+					kind: SpanKind.SERVER,
+				}
+				return tracer.startActiveSpan(`DO RPC ${methodName}`, options, async (span) => {
+					try {
+						const bound = target.bind(unwrap(thisArg))
+						const result = await bound.apply(thisArg, argArray)
+						span.setStatus({ code: SpanStatusCode.OK })
+						return result
+					} catch (error) {
+						span.recordException(error as Exception)
+						span.setStatus({ code: SpanStatusCode.ERROR })
+						throw error
+					} finally {
+						span.end()
+					}
+				})
+			})
 		},
 	}
 	return wrap(fn, fnHandler)
