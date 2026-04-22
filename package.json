@@ -1,6 +1,6 @@
 {
 	"name": "@pmort/otel-cf-workers",
-	"version": "1.0.0-rc.55",
+	"version": "1.0.0-rc.56",
 	"module": "./dist/index.js",
 	"type": "module",
 	"types": "./dist/index.d.ts",
