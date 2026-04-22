@@ -1,6 +1,21 @@
-import { context as api_context, trace, SpanOptions, SpanKind, Exception, SpanStatusCode } from '@opentelemetry/api'
+import {
+	context as api_context,
+	trace,
+	SpanOptions,
+	SpanKind,
+	Exception,
+	SpanStatusCode,
+	type Context,
+} from '@opentelemetry/api'
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions'
 import { passthroughGet, unwrap, wrap } from '../wrap.js'
+import {
+	RPC_TRACE_SENTINEL_KEY,
+	isRpcTraceSentinel,
+	makeRpcTraceSentinel,
+	spanContextToTraceparent,
+	traceparentToSpanContext,
+} from './do-rpc-trace.js'
 import {
 	getParentContextFromHeaders,
 	gatherIncomingCfAttributes,
@@ -40,7 +55,14 @@ function instrumentStubRpc(
 			}
 			return tracer.startActiveSpan(`DO RPC ${nsName}.${methodName}`, options, async (span) => {
 				try {
-					const result = await Reflect.apply(target, unwrap(thisArg), argArray)
+					// Append a trace-context sentinel as an extra trailing
+					// argument. Server side (instrumentAnyFn) detects the
+					// marker, strips it, and uses the traceparent to parent
+					// its DO RPC server span — stitching what would
+					// otherwise be two disjoint traces into one.
+					const sentinel = makeRpcTraceSentinel(spanContextToTraceparent(span.spanContext()))
+					const propagatedArgs = [...argArray, sentinel]
+					const result = await Reflect.apply(target, unwrap(thisArg), propagatedArgs)
 					span.setStatus({ code: SpanStatusCode.OK })
 					return result
 				} catch (error) {
@@ -220,13 +242,28 @@ function instrumentAnyFn(fn: () => any, initialiser: Initialiser, env: Env, id: 
 	if (!fn) return undefined
 
 	const fnHandler: ProxyHandler<() => any> = {
-		async apply(target, thisArg, argArray: []) {
+		async apply(target, thisArg, argArray: unknown[]) {
 			thisArg = unwrap(thisArg)
 			const config = initialiser(env, 'do-rpc')
-			const context = setConfig(config)
+			const baseContext = setConfig(config)
+
+			// If the client-side proxy appended a trace-context sentinel,
+			// strip it from the user-visible argArray and rehydrate the
+			// SpanContext so the DO RPC server span can parent to it.
+			let parentContext: Context | undefined
+			let userArgs: unknown[] = argArray
+			const last = argArray.length > 0 ? argArray[argArray.length - 1] : undefined
+			if (isRpcTraceSentinel(last)) {
+				userArgs = argArray.slice(0, -1)
+				const parsed = traceparentToSpanContext(last[RPC_TRACE_SENTINEL_KEY])
+				if (parsed) {
+					parentContext = trace.setSpanContext(baseContext, parsed)
+				}
+			}
+			const activeContext = parentContext ?? baseContext
 
 			const methodName = target.name || 'unknown'
-			return api_context.with(context, () => {
+			return api_context.with(activeContext, () => {
 				const tracer = trace.getTracer('DO rpcHandler')
 				const name = id.name || ''
 				const options: SpanOptions = {
@@ -241,7 +278,10 @@ function instrumentAnyFn(fn: () => any, initialiser: Initialiser, env: Env, id: 
 				return tracer.startActiveSpan(`DO RPC ${methodName}`, options, async (span) => {
 					try {
 						const bound = target.bind(unwrap(thisArg))
-						const result = await bound.apply(thisArg, argArray)
+						// Upstream ProxyHandler types argArray as tuple `[]` but the
+						// SDK has always passed through variadic args; cast is a
+						// no-op at runtime.
+						const result = await bound.apply(thisArg, userArgs as unknown as [])
 						span.setStatus({ code: SpanStatusCode.OK })
 						return result
 					} catch (error) {
