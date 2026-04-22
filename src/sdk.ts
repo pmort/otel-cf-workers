@@ -17,8 +17,7 @@ import { versionAttributes } from './instrumentation/version.js'
 import { PromiseTracker, proxyExecutionContext } from './instrumentation/common.js'
 import { emailInstrumentation } from './instrumentation/email.js'
 
-//@ts-ignore
-import * as versions from '../versions.json'
+import { PKG_NAME, PKG_VERSION } from './version.js'
 //@ts-ignore
 import { env } from 'cloudflare:workers'
 
@@ -64,9 +63,8 @@ const createResource = (config: ResolvedTraceConfig, versionMeta?: WorkerVersion
 		'cloud.region': 'earth',
 		'faas.max_memory': 134217728,
 		'telemetry.sdk.language': 'js',
-		'telemetry.sdk.name': '@pmort/otel-cf-workers',
-		'telemetry.sdk.version': versions['@pmort/otel-cf-workers'],
-		'telemetry.sdk.build.node_version': versions['node'],
+		'telemetry.sdk.name': PKG_NAME,
+		'telemetry.sdk.version': PKG_VERSION,
 		'cf.worker.version.id': versionMeta?.id,
 		'cf.worker.version.tag': versionMeta?.tag,
 		'cf.worker.version.timestamp': versionMeta?.timestamp,

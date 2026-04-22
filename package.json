@@ -1,16 +1,15 @@
 {
 	"name": "@pmort/otel-cf-workers",
-	"version": "1.0.0-rc.56",
+	"version": "1.0.0-rc.57",
 	"module": "./dist/index.js",
 	"type": "module",
 	"types": "./dist/index.d.ts",
 	"exports": "./dist/index.js",
 	"scripts": {
-		"clean": "rimraf ./dist versions.json",
+		"clean": "rimraf ./dist",
 		"format": "prettier --ignore-unknown --write .",
 		"build:src": "tsup",
-		"build:versions": "pnpm version --json > versions.json",
-		"build": "run-s -l build:versions build:src test",
+		"build": "run-s -l build:src test",
 		"cs-version": "changeset version",
 		"cs-publish": "changeset publish",
 		"release": "run-s -l clean cs-version build check cs-publish",
@@ -19,6 +18,7 @@
 		"check:types": "tsc --noEmit",
 		"watch": "tsc --watch",
 		"prepare": "husky",
+		"prepack": "run-s -l clean build:src",
 		"test": "vitest run",
 		"test:dev": "vitest",
 		"ci": "run-s -l clean build check"
