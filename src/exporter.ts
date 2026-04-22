@@ -4,8 +4,7 @@ import { JsonTraceSerializer } from '@opentelemetry/otlp-transformer'
 import { SpanExporter } from '@opentelemetry/sdk-trace-base'
 import { unwrap } from './wrap.js'
 
-//@ts-ignore
-import * as versions from '../versions.json'
+import { PKG_NAME, PKG_VERSION } from './version.js'
 
 export interface OTLPExporterConfig {
 	url: string
@@ -15,7 +14,7 @@ export interface OTLPExporterConfig {
 const defaultHeaders: Record<string, string> = {
 	accept: 'application/json',
 	'content-type': 'application/json',
-	'user-agent': `Cloudflare Worker @pmort/otel-cf-workers v${versions['@pmort/otel-cf-workers']}`,
+	'user-agent': `Cloudflare Worker ${PKG_NAME} v${PKG_VERSION}`,
 }
 
 export class OTLPExporter implements SpanExporter {
